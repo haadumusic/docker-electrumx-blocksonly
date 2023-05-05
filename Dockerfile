@@ -1,7 +1,7 @@
 ARG VERSION=1.16.0
 
 FROM python:3.7-alpine3.11
-LABEL maintainer="Luke Childs <lukechilds123@gmail.com>"
+LABEL maintainer="boss"
 
 ARG VERSION
 
@@ -12,7 +12,7 @@ RUN chmod a+x /usr/local/bin/* && \
     apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.11/main leveldb-dev && \
     apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing rocksdb-dev && \
     pip install aiohttp pylru plyvel websockets python-rocksdb uvloop && \
-    git clone -b $VERSION https://github.com/spesmilo/electrumx.git && \
+    git clone -b $VERSION https://github.com/haadumusic/electrumx-blocksonly.git && \
     cd electrumx && \
     python setup.py install && \
     apk del git build-base && \
@@ -27,6 +27,9 @@ ENV SERVICES=tcp://:50001,ssl://:50002,wss://:50004,rpc://0.0.0.0:8000
 ENV SSL_CERTFILE ${DB_DIRECTORY}/electrumx.crt
 ENV SSL_KEYFILE ${DB_DIRECTORY}/electrumx.key
 ENV HOST ""
+ENV PEER_DISCOVERY self
+ENV DB_ENGINE rocksdb
+ENV COIN BitcoinSegwit
 WORKDIR /data
 
 EXPOSE 50001 50002 50004 8000
