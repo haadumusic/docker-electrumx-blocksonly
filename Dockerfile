@@ -1,37 +1,54 @@
-ARG VERSION=1.16.0
+# example of Dockerfile that installs spesmilo electrumx 1.16.0
+# ENV variables can be overriden on the `docker run` command
 
-FROM python:3.7-alpine3.11
-LABEL maintainer="boss"
+FROM python:3.9.4-buster AS builder
 
-ARG VERSION
+WORKDIR /usr/src/app
 
-COPY ./bin /usr/local/bin
+# Install the libs needed by rocksdb (including development headers)
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install \
+        librocksdb-dev libsnappy-dev libbz2-dev libz-dev liblz4-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN chmod a+x /usr/local/bin/* && \
-    apk add --no-cache git build-base openssl && \
-    apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/v3.11/main leveldb-dev && \
-    apk add --no-cache --repository http://dl-cdn.alpinelinux.org/alpine/edge/testing rocksdb-dev && \
-    pip install aiohttp pylru plyvel websockets python-rocksdb uvloop && \
-    git clone -b $VERSION https://github.com/haadumusic/electrumx-blocksonly.git && \
-    cd electrumx && \
-    python setup.py install && \
-    apk del git build-base && \
-    rm -rf /tmp/*
+RUN python -m venv venv
 
-VOLUME ["/data"]
-ENV HOME /data
-ENV ALLOW_ROOT 1
+RUN venv/bin/pip install --no-cache-dir aiohttp pylru plyvel websockets python-rocksdb uvloop aiorpcx && \
+    git clone https://github.com/haadumusic/electrumx-blocksonly.git && \
+    cd electrumx-blocksonly && \
+    python setup.py install
+    
+FROM python:3.9.4-slim-buster
+
+# Install the libs needed by rocksdb (no development headers or statics)
+RUN apt-get update \
+    && apt-get -y --no-install-recommends install \
+        librocksdb5.17 libsnappy1v5 libbz2-1.0 zlib1g liblz4-1 \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV EVENT_LOOP_POLICY uvloop
-ENV DB_DIRECTORY /data
-ENV SERVICES=tcp://:50001,ssl://:50002,wss://:50004,rpc://0.0.0.0:8000
-ENV SSL_CERTFILE ${DB_DIRECTORY}/electrumx.crt
-ENV SSL_KEYFILE ${DB_DIRECTORY}/electrumx.key
-ENV HOST ""
-ENV PEER_DISCOVERY self
-ENV DB_ENGINE rocksdb
-ENV COIN BitcoinSegwit
-WORKDIR /data
+ENV SERVICES="ssl://:50002"
+ENV COIN=BitcoinSegwit
+ENV DB_DIRECTORY=/var/lib/electrumx
+ENV DAEMON_URL="http://electrum:electrum@192.168.1.4:8332/"
+ENV ALLOW_ROOT=true
+ENV DB_ENGINE=rocksdb
+ENV PEER_DISCOVERY=self
+ENV SSL_CERTFILE="/var/lib/electrumx/electrumx.crt"
+ENV SSL_KEYFILE="/var/lib/electrumx/electrumx.key"
 
-EXPOSE 50001 50002 50004 8000
+WORKDIR /usr/src/app
+COPY --from=builder /usr/src/app .
 
-CMD ["init"]
+VOLUME /var/lib/electrumx
+
+RUN mkdir -p "$DB_DIRECTORY" && ulimit -n 1048576
+
+EXPOSE 50002
+
+CMD ["/usr/src/app/venv/bin/python", "/usr/src/app/electrumx-blocksonly/electrumx_server"]
+
+# build it with eg.: `docker build -t blocksonly .`
+# run it with eg.:
+# `docker run -d -v /Users/boss/.electrumx:/var/lib/electrumx -p 50002:50002 blocksonly`
+# for a clean shutdown, send TERM signal to the running container eg.: `docker kill --signal="TERM" CONTAINER_ID`
